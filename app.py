@@ -38,7 +38,8 @@ class WebsiteSummarizationWorkflow(Workflow):
     @step
     async def fetch_website_content(self, ev: StartEvent) -> ContentFetched:
         """Fetch the content of the website."""
-        url = ev.data.get("url")
+        # Get URL from the event data or kwargs passed to run()
+        url = getattr(ev, 'url', None) or (hasattr(ev, 'data') and ev.data.get("url"))
         if not url:
             raise ValueError("URL is required")
         
