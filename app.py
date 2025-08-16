@@ -1,17 +1,10 @@
 import os
-import asyncio
 from typing import Any, List, Optional
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel, HttpUrl
 from contextlib import asynccontextmanager
 
-from llama_index.core import (
-    VectorStoreIndex,
-    SimpleDirectoryReader,
-    StorageContext,
-    load_index_from_storage,
-    Settings,
-)
+
 from llama_index.core.workflow import (
     Event,
     StartEvent,
@@ -106,28 +99,12 @@ class WebsiteSummarizationWorkflow(Workflow):
 
 
 # Global variables
-query_engine = None
 summarization_workflow = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global query_engine, summarization_workflow
-    
-    # Initialize the original document query functionality
-    PERSIST_DIR = "./storage"
-    if not os.path.exists(PERSIST_DIR):
-        # load the documents and create the index
-        documents = SimpleDirectoryReader("data").load_data()
-        index = VectorStoreIndex.from_documents(documents)
-        # store it for later
-        index.storage_context.persist(persist_dir=PERSIST_DIR)
-    else:
-        # load the existing index
-        storage_context = StorageContext.from_defaults(persist_dir=PERSIST_DIR)
-        index = load_index_from_storage(storage_context)
-    
-    query_engine = index.as_query_engine()
+    global summarization_workflow
     
     # Initialize the website summarization workflow
     summarization_workflow = WebsiteSummarizationWorkflow()
@@ -140,23 +117,14 @@ async def lifespan(app: FastAPI):
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="LlamaIndex Query API with Website Summarization",
-    description="Query documents and summarize website content using LlamaIndex",
+    title="Website Summarization API",
+    description="Summarize website content using LlamaIndex",
     version="2.0.0",
     lifespan=lifespan
 )
 
 
 # Request/Response models
-class QueryRequest(BaseModel):
-    query: str
-
-
-class QueryResponse(BaseModel):
-    response: str
-    query: str
-
-
 class URLRequest(BaseModel):
     url: HttpUrl
 
@@ -176,7 +144,7 @@ class HealthResponse(BaseModel):
 async def health_check():
     return HealthResponse(
         status="healthy",
-        message="LlamaIndex Query API with Website Summarization is running"
+        message="Website Summarization API is running"
     )
 
 
@@ -184,31 +152,16 @@ async def health_check():
 @app.get("/")
 async def root():
     return {
-        "message": "Welcome to the LlamaIndex Query API with Website Summarization",
-        "description": "Ask questions about documents and get website summaries",
+        "message": "Welcome to the Website Summarization API",
+        "description": "Get AI-powered summaries of website content",
         "endpoints": {
-            "POST /query": "Submit a query about the documents",
             "POST /summarize": "Get a summary of a website",
+            "OPTIONS /summarize": "Get allowed methods for summarize endpoint",
             "GET /health": "Health check endpoint",
             "GET /docs": "API documentation"
         }
     }
 
-
-# Original query endpoint
-@app.post("/query", response_model=QueryResponse)
-async def query_story(request: QueryRequest):
-    if not request.query.strip():
-        raise HTTPException(status_code=400, detail="Query cannot be empty")
-    
-    try:
-        response = query_engine.query(request.query)
-        return QueryResponse(
-            response=str(response),
-            query=request.query
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
 
 
 # New website summarization endpoint
@@ -241,6 +194,21 @@ async def summarize_website(request: URLRequest):
             status_code=500, 
             detail=f"An error occurred while summarizing the website: {str(e)}"
         )
+
+
+@app.options("/summarize")
+async def summarize_options():
+    """
+    Handle OPTIONS request for the summarize endpoint.
+    Returns allowed methods and CORS headers.
+    """
+    response = Response()
+    response.headers["Allow"] = "POST, OPTIONS"
+    response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    
+    return response
 
 
 if __name__ == "__main__":
