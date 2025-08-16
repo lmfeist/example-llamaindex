@@ -1,7 +1,7 @@
 import os
 import asyncio
 from typing import Any, List, Optional
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel, HttpUrl
 from contextlib import asynccontextmanager
 
@@ -189,6 +189,7 @@ async def root():
         "endpoints": {
             "POST /query": "Submit a query about the documents",
             "POST /summarize": "Get a summary of a website",
+            "OPTIONS /summarize": "Get allowed methods for summarize endpoint",
             "GET /health": "Health check endpoint",
             "GET /docs": "API documentation"
         }
@@ -241,6 +242,21 @@ async def summarize_website(request: URLRequest):
             status_code=500, 
             detail=f"An error occurred while summarizing the website: {str(e)}"
         )
+
+
+@app.options("/summarize")
+async def summarize_options():
+    """
+    Handle OPTIONS request for the summarize endpoint.
+    Returns allowed methods and CORS headers.
+    """
+    response = Response()
+    response.headers["Allow"] = "POST, OPTIONS"
+    response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    
+    return response
 
 
 if __name__ == "__main__":
