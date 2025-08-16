@@ -1,6 +1,9 @@
 import os
+import traceback
 from typing import Any, List, Optional
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Response, Request
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, HttpUrl
 from contextlib import asynccontextmanager
 
@@ -67,7 +70,8 @@ class WebsiteSummarizationWorkflow(Workflow):
             return ContentFetched(content=content, url=url)
             
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Failed to fetch content from {url}: {str(e)}")
+            # Re-raise the original exception to let the custom exception handler show the full stack trace
+            raise e
 
     @step
     async def generate_summary(self, ev: ContentFetched) -> StopEvent:
@@ -95,7 +99,8 @@ class WebsiteSummarizationWorkflow(Workflow):
             return StopEvent(result={"summary": summary, "url": ev.url})
             
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to generate summary: {str(e)}")
+            # Re-raise the original exception to let the custom exception handler show the full stack trace
+            raise e
 
 
 # Global variables
@@ -120,8 +125,51 @@ app = FastAPI(
     title="Website Summarization API",
     description="Summarize website content using LlamaIndex",
     version="2.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    debug=True  # Enable debug mode for detailed error responses
 )
+
+
+# Custom exception handler to show stack traces
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """
+    Handle all unhandled exceptions and return detailed error information including stack trace.
+    """
+    error_detail = {
+        "error": str(exc),
+        "type": type(exc).__name__,
+        "traceback": traceback.format_exc(),
+        "path": str(request.url),
+        "method": request.method
+    }
+    
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Internal server error with full stack trace",
+            "error_info": error_detail
+        }
+    )
+
+
+# Enhanced HTTP exception handler to show more details
+@app.exception_handler(HTTPException)
+async def custom_http_exception_handler(request: Request, exc: HTTPException):
+    """
+    Handle HTTP exceptions with additional context.
+    """
+    error_detail = {
+        "status_code": exc.status_code,
+        "detail": exc.detail,
+        "path": str(request.url),
+        "method": request.method
+    }
+    
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=error_detail
+    )
 
 
 # Request/Response models
@@ -190,10 +238,8 @@ async def summarize_website(request: URLRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=500, 
-            detail=f"An error occurred while summarizing the website: {str(e)}"
-        )
+        # Re-raise the original exception to let the custom exception handler show the full stack trace
+        raise e
 
 
 @app.options("/summarize")
