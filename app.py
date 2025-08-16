@@ -1,6 +1,10 @@
 import os
+import traceback
+import logging
 from typing import Any, List, Optional
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Response, Request
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, HttpUrl
 from contextlib import asynccontextmanager
 
@@ -67,6 +71,8 @@ class WebsiteSummarizationWorkflow(Workflow):
             return ContentFetched(content=content, url=url)
             
         except Exception as e:
+            # Log the full exception with stack trace for debugging
+            logger.error(f"Failed to fetch content from {url}:\n{traceback.format_exc()}")
             raise HTTPException(status_code=400, detail=f"Failed to fetch content from {url}: {str(e)}")
 
     @step
@@ -95,6 +101,8 @@ class WebsiteSummarizationWorkflow(Workflow):
             return StopEvent(result={"summary": summary, "url": ev.url})
             
         except Exception as e:
+            # Log the full exception with stack trace for debugging
+            logger.error(f"Failed to generate summary:\n{traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=f"Failed to generate summary: {str(e)}")
 
 
@@ -120,8 +128,73 @@ app = FastAPI(
     title="Website Summarization API",
     description="Summarize website content using LlamaIndex",
     version="2.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    debug=True  # Enable debug mode for detailed error responses
 )
+
+
+# Configure logging to show detailed error information
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    force=True  # Override any existing logging configuration
+)
+logger = logging.getLogger(__name__)
+
+# Also set uvicorn access logger to show more details
+uvicorn_logger = logging.getLogger("uvicorn.access")
+uvicorn_logger.setLevel(logging.DEBUG)
+
+
+# Custom exception handler to log stack traces to server console
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """
+    Handle all unhandled exceptions, log full stack trace to server console,
+    and return a clean error response to the client.
+    """
+    # Log the full stack trace to server console
+    logger.error(
+        f"Unhandled exception in {request.method} {request.url}:\n"
+        f"Exception type: {type(exc).__name__}\n"
+        f"Exception message: {str(exc)}\n"
+        f"Full traceback:\n{traceback.format_exc()}"
+    )
+    
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Internal server error",
+            "path": str(request.url),
+            "method": request.method
+        }
+    )
+
+
+# Enhanced HTTP exception handler to log HTTP exceptions
+@app.exception_handler(HTTPException)
+async def custom_http_exception_handler(request: Request, exc: HTTPException):
+    """
+    Handle HTTP exceptions with logging for server-side debugging.
+    """
+    # Log HTTP exceptions for debugging
+    logger.warning(
+        f"HTTP exception in {request.method} {request.url}:\n"
+        f"Status code: {exc.status_code}\n"
+        f"Detail: {exc.detail}"
+    )
+    
+    error_detail = {
+        "status_code": exc.status_code,
+        "detail": exc.detail,
+        "path": str(request.url),
+        "method": request.method
+    }
+    
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=error_detail
+    )
 
 
 # Request/Response models
@@ -190,6 +263,8 @@ async def summarize_website(request: URLRequest):
     except HTTPException:
         raise
     except Exception as e:
+        # Log the full exception with stack trace for debugging
+        logger.error(f"Error in summarize_website endpoint:\n{traceback.format_exc()}")
         raise HTTPException(
             status_code=500, 
             detail=f"An error occurred while summarizing the website: {str(e)}"
@@ -214,4 +289,13 @@ async def summarize_options():
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    
+    # Configure uvicorn to show detailed logs and stack traces
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=port,
+        log_level="debug",  # Enable debug logging
+        access_log=True,    # Show access logs
+        use_colors=True     # Enable colored output for better readability
+    )
