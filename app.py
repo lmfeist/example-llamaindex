@@ -5,6 +5,7 @@ from typing import Any, List, Optional
 from fastapi import FastAPI, HTTPException, Response, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl
 from contextlib import asynccontextmanager
 
@@ -136,6 +137,16 @@ app = FastAPI(
     version="2.0.0",
     lifespan=lifespan,
     debug=True  # Enable debug mode for detailed error responses
+)
+
+# Add CORS middleware to ensure CORS headers are always added
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
+    max_age=86400,  # Cache preflight for 24 hours
 )
 
 
@@ -281,13 +292,10 @@ async def summarize_website(request: URLRequest):
 async def summarize_options():
     """
     Handle OPTIONS request for the summarize endpoint.
-    Returns allowed methods and CORS headers.
+    Returns allowed methods. CORS headers are handled by middleware.
     """
     response = Response()
     response.headers["Allow"] = "POST, OPTIONS"
-    response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-    response.headers["Access-Control-Allow-Origin"] = "*"
     
     return response
 
