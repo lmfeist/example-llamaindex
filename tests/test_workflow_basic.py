@@ -23,7 +23,7 @@ class TestFetchWebsiteContent:
             mock_reader.load_data.return_value = [mock_document]
             mock_reader_class.return_value = mock_reader
             
-            start_event = StartEvent(data={"url": sample_url})
+            start_event = StartEvent(url=sample_url)
             result = await workflow.fetch_website_content(start_event)
             
             assert isinstance(result, ContentFetched)
@@ -52,7 +52,7 @@ class TestFetchWebsiteContent:
             mock_response.raise_for_status.return_value = None
             mock_requests.return_value = mock_response
             
-            start_event = StartEvent(data={"url": sample_url})
+            start_event = StartEvent(url=sample_url)
             result = await workflow.fetch_website_content(start_event)
             
             assert isinstance(result, ContentFetched)
@@ -65,7 +65,7 @@ class TestFetchWebsiteContent:
     async def test_fetch_content_missing_url(self, workflow):
         """Test error handling when URL is missing."""
         
-        start_event = StartEvent(data={})
+        start_event = StartEvent()  # No URL provided
         
         with pytest.raises(ValueError, match="URL is required"):
             await workflow.fetch_website_content(start_event)
@@ -85,7 +85,7 @@ class TestFetchWebsiteContent:
             # Mock requests to raise an exception
             mock_requests.side_effect = requests.exceptions.RequestException("Connection failed")
             
-            start_event = StartEvent(data={"url": sample_url})
+            start_event = StartEvent(url=sample_url)
             
             with pytest.raises(HTTPException) as exc_info:
                 await workflow.fetch_website_content(start_event)
