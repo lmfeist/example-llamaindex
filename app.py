@@ -8,6 +8,11 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, HttpUrl
 from contextlib import asynccontextmanager
 
+# Disable LlamaIndex instrumentation to prevent context token errors
+os.environ["LLAMA_INDEX_DISABLE_TELEMETRY"] = "true"
+
+# Also disable OpenTelemetry instrumentation if it's enabled
+os.environ["OTEL_SDK_DISABLED"] = "true"
 
 from llama_index.core.workflow import (
     Event,
