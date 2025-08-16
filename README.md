@@ -19,7 +19,19 @@
 
 Koyeb is a developer-friendly serverless platform to deploy apps globally. No-ops, servers, or infrastructure management.
 
-This repository contains is designed to show how [LlamaIndex](https://www.llamaindex.ai/) applications can be deployed to Koyeb.  The `Dockerfile` in this repository builds an image that serves a LlamaIndex application with a [Streamlit]( https://streamlit.io/) frontend that queries the OpenAI API about the short story "The Gift of the Magi" by O. Henry.
+This repository contains is designed to show how [LlamaIndex](https://www.llamaindex.ai/) applications can be deployed to Koyeb. The `Dockerfile` in this repository builds an image that serves a LlamaIndex application with a [FastAPI](https://fastapi.tiangolo.com/) backend that provides REST API endpoints to query the OpenAI API about the short story "The Gift of the Magi" by O. Henry.
+
+## API Endpoints
+
+The FastAPI service provides the following endpoints:
+
+- `GET /` - Welcome message and API information
+- `GET /health` - Health check endpoint
+- `POST /query` - Submit a query about the story
+  - Request body: `{"query": "Your question here"}`
+  - Response: `{"response": "Answer from LlamaIndex", "query": "Your question"}`
+- `GET /docs` - Interactive API documentation (Swagger UI)
+- `GET /redoc` - Alternative API documentation
 
 ## Getting Started
 
@@ -59,6 +71,23 @@ On the [Koyeb Control Panel](https://app.koyeb.com/), on the **Overview** tab, c
 5. Choose a name for your App and Service, for example `example-llamaindex`, and click **Deploy**.
 
 A container image for the LlamaIndex application will be built and a container will be deployed to Koyeb.  You can follow the build process as the repository is cloned, built, and deployed.  Once the deployment is complete, it will be accessible using the Koyeb subdomain for your service.
+
+### Using the API
+
+Once deployed, you can interact with the API using curl or any HTTP client:
+
+```bash
+# Health check
+curl https://your-app-url.koyeb.app/health
+
+# Query the story
+curl -X POST https://your-app-url.koyeb.app/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What happens in the story?"}'
+
+# View interactive documentation
+# Visit https://your-app-url.koyeb.app/docs in your browser
+```
 
 ## Contributing
 
