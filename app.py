@@ -19,8 +19,7 @@ from llama_index.core.workflow import (
     Workflow,
     step,
 )
-from llama_index.core.tools import FunctionTool
-from llama_index.core.agent import FunctionCallingAgent
+# Removed unused imports - FunctionTool and FunctionCallingAgent not needed for this workflow
 from llama_index.llms.openai import OpenAI
 from llama_index.readers.web import SimpleWebPageReader
 import requests
@@ -28,17 +27,8 @@ from bs4 import BeautifulSoup
 
 
 # Events for the workflow
-class URLProvided(Event):
-    url: str
-
-
 class ContentFetched(Event):
     content: str
-    url: str
-
-
-class SummaryGenerated(Event):
-    summary: str
     url: str
 
 
