@@ -131,7 +131,7 @@ class WebsiteSummarizationWorkflow(Workflow):
 # PDF to Neo4j Property Graph Workflow
 class PDFToGraphWorkflow(Workflow):
     def __init__(self, llm: Optional[Any] = None):
-        super().__init__()
+        super().__init__(timeout=600)
         self.llm = llm or OpenAI(model="gpt-4o-mini", temperature=0.0)
 
     @step
@@ -265,7 +265,7 @@ async def lifespan(app: FastAPI):
     summarization_workflow = WebsiteSummarizationWorkflow()
     
     # Initialize the PDF to graph workflow
-    pdf_workflow = PDFToGraphWorkflow(timeout=600)
+    pdf_workflow = PDFToGraphWorkflow()
     
     yield
     
