@@ -11,6 +11,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl
 from contextlib import asynccontextmanager
 
+# Fix for asyncio.run() cannot be called from a running event loop
+import nest_asyncio
+nest_asyncio.apply()
+
 # Disable LlamaIndex instrumentation to prevent context token errors
 os.environ["LLAMA_INDEX_DISABLE_TELEMETRY"] = "true"
 
