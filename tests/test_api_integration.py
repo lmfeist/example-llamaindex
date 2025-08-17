@@ -127,6 +127,15 @@ class TestSummarizeEndpoint:
         assert "Allow" in response.headers
         assert "POST, OPTIONS" in response.headers["Allow"]
 
+    def test_upload_pdfs_options_request(self, client):
+        """Test OPTIONS request for upload_pdfs endpoint CORS handling."""
+        
+        response = client.options("/upload_pdfs")
+        
+        assert response.status_code == 200
+        assert "Allow" in response.headers
+        assert "POST, OPTIONS" in response.headers["Allow"]
+
 class TestAPIErrorHandling:
     """Test API-level error handling."""
     
