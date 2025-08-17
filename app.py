@@ -204,13 +204,23 @@ class PDFToGraphWorkflow(Workflow):
                 ],
             }
 
+            # Define entity properties for schema generation
+            entity_props = {
+                "GENE": {"description": "A gene or genetic element"},
+                "PATHWAY": {"description": "A biological pathway"},
+                "DISEASE": {"description": "A disease or medical condition"},
+                "TREATMENT": {"description": "A treatment or therapeutic intervention"},
+                "TREATMENT_OUTCOME": {"description": "An outcome or result of treatment"}
+            }
+
             # Initialize knowledge graph extractor
             kg_extractor = SchemaLLMPathExtractor(
                 llm=self.llm,
                 possible_entities=entities,
                 possible_relations=relations,
                 kg_validation_schema=validation_schema,
-                strict=True,
+                entity_props=entity_props,
+                strict=False,  # Set to False to avoid Pydantic schema generation issues
             )
 
             # Connect to Neo4j using environment variables
