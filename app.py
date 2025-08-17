@@ -265,7 +265,7 @@ async def lifespan(app: FastAPI):
     summarization_workflow = WebsiteSummarizationWorkflow()
     
     # Initialize the PDF to graph workflow
-    pdf_workflow = PDFToGraphWorkflow()
+    pdf_workflow = PDFToGraphWorkflow(timeout=600)
     
     yield
     
