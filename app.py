@@ -173,8 +173,8 @@ class PDFToGraphWorkflow(Workflow):
         """Create property graph index in Neo4j from processed documents."""
         try:
             # Define biomedical entities and relations for knowledge extraction
-            entities = ["GENE", "PATHWAY", "DISEASE", "TREATMENT", "TREATMENT_OUTCOME"]
-            relations = [
+            entities = Literal["GENE", "PATHWAY", "DISEASE", "TREATMENT", "TREATMENT_OUTCOME"]
+            relations = Literal[
                 "REGULATES", "INTERACTS_WITH", "CAUSES", "TREATS", "RESULTS_IN",
                 "ASSOCIATED_WITH", "TARGETS", "INHIBITS", "ACTIVATES", "PART_OF",
                 "RESPONDS_TO", "MODULATES", "INVOLVED_IN", "CAUSED_BY", "TREATED_BY"
