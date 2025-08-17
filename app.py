@@ -5,8 +5,9 @@ import tempfile
 import shutil
 from typing import Any, List, Optional
 from fastapi import FastAPI, HTTPException, Response, Request, UploadFile, File
-from fastapi.exception_handlers import http_exception_handler
+from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl
 from contextlib import asynccontextmanager
@@ -288,6 +289,50 @@ app.add_middleware(
     max_age=86400,  # Cache preflight for 24 hours
 )
 
+# Custom validation error handler to provide better error messages for file uploads
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """
+    Custom handler for request validation errors.
+    Provides more detailed error messages for file upload issues.
+    """
+    logger.error(f"Validation error on {request.method} {request.url}: {exc.errors()}")
+    
+    # Check if this is related to file upload
+    if request.url.path == "/upload_pdfs":
+        errors = exc.errors()
+        
+        # Check for missing files parameter
+        for error in errors:
+            if error.get("loc") == ["body", "files"] and error.get("type") == "missing":
+                return JSONResponse(
+                    status_code=422,
+                    content={
+                        "detail": "Missing 'files' parameter. Please ensure you're uploading files with the parameter name 'files'.",
+                        "error_type": "missing_files_parameter",
+                        "help": "Use: curl -X POST /upload_pdfs -F 'files=@your_file.pdf'"
+                    }
+                )
+            elif error.get("type") == "value_error":
+                return JSONResponse(
+                    status_code=422,
+                    content={
+                        "detail": "Invalid file data. Please ensure you're uploading valid PDF files.",
+                        "error_type": "invalid_file_data",
+                        "validation_errors": errors
+                    }
+                )
+    
+    # Default validation error response
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": "Request validation failed",
+            "errors": exc.errors(),
+            "help": "Please check your request format and try again."
+        }
+    )
+
 
 # Configure logging to show detailed error information
 logging.basicConfig(
@@ -461,8 +506,24 @@ async def upload_pdfs(files: List[UploadFile] = File(...)):
         PDFProcessResponse containing processing results and metadata
     """
     try:
+        logger.info(f"Received {len(files) if files else 0} files for processing")
+        
+        # Check if files list is empty
+        if not files:
+            raise HTTPException(
+                status_code=400,
+                detail="No files provided. Please upload at least one PDF file."
+            )
+        
         # Validate file types
-        for file in files:
+        for i, file in enumerate(files):
+            logger.info(f"Processing file {i+1}: {file.filename}, content_type: {file.content_type}, size: {file.size}")
+            
+            if not file.filename:
+                raise HTTPException(
+                    status_code=400,
+                    detail="One or more files have no filename."
+                )
             if not file.filename.lower().endswith('.pdf'):
                 raise HTTPException(
                     status_code=400, 
