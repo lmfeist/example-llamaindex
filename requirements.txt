@@ -8,3 +8,4 @@ python-multipart
 uvicorn
 neo4j
 PyPDF2
+nest-asyncio
