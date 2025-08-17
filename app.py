@@ -172,18 +172,36 @@ class PDFToGraphWorkflow(Workflow):
     async def create_property_graph(self, ev: PDFsProcessed) -> StopEvent:
         """Create property graph index in Neo4j from processed documents."""
         try:
-            # Define entities and relations for knowledge extraction
-            entities = ["PERSON", "ORGANIZATION", "LOCATION", "CONCEPT", "TECHNOLOGY", "PRODUCT"]
-            relations = ["WORKS_AT", "LOCATED_IN", "RELATED_TO", "USES", "DEVELOPS", "MANAGES", "PART_OF"]
+            # Define biomedical entities and relations for knowledge extraction
+            entities = ["GENE", "PATHWAY", "DISEASE", "TREATMENT", "TREATMENT_OUTCOME"]
+            relations = [
+                "REGULATES", "INTERACTS_WITH", "CAUSES", "TREATS", "RESULTS_IN",
+                "ASSOCIATED_WITH", "TARGETS", "INHIBITS", "ACTIVATES", "PART_OF",
+                "RESPONDS_TO", "MODULATES", "INVOLVED_IN", "CAUSED_BY", "TREATED_BY"
+            ]
             
-            # Create validation schema
+            # Create biomedical validation schema
             validation_schema = {
-                "PERSON": ["WORKS_AT", "LOCATED_IN", "RELATED_TO", "USES", "MANAGES"],
-                "ORGANIZATION": ["LOCATED_IN", "RELATED_TO", "USES", "DEVELOPS", "MANAGES"],
-                "LOCATION": ["RELATED_TO", "PART_OF"],
-                "CONCEPT": ["RELATED_TO", "USES", "PART_OF"],
-                "TECHNOLOGY": ["RELATED_TO", "USES", "DEVELOPS"],
-                "PRODUCT": ["RELATED_TO", "USES", "DEVELOPS", "PART_OF"],
+                "GENE": [
+                    "REGULATES", "INTERACTS_WITH", "CAUSES", "ASSOCIATED_WITH", 
+                    "TARGETS", "MODULATES", "INVOLVED_IN", "PART_OF"
+                ],
+                "PATHWAY": [
+                    "REGULATES", "INTERACTS_WITH", "ASSOCIATED_WITH", 
+                    "MODULATES", "INVOLVED_IN", "PART_OF", "TARGETS"
+                ],
+                "DISEASE": [
+                    "CAUSED_BY", "ASSOCIATED_WITH", "RESPONDS_TO", "TREATED_BY",
+                    "RESULTS_IN", "INVOLVED_IN", "TARGETS"
+                ],
+                "TREATMENT": [
+                    "TREATS", "TARGETS", "INHIBITS", "ACTIVATES", "RESULTS_IN",
+                    "MODULATES", "INTERACTS_WITH", "ASSOCIATED_WITH"
+                ],
+                "TREATMENT_OUTCOME": [
+                    "RESULTS_IN", "ASSOCIATED_WITH", "CAUSED_BY", "INVOLVED_IN",
+                    "RESPONDS_TO", "MODULATES"
+                ],
             }
 
             # Initialize knowledge graph extractor

@@ -1,14 +1,14 @@
 # PDF to Neo4j Property Graph Endpoint
 
-This document describes the new PDF processing endpoint that uploads PDF files and creates a Neo4j property graph index using LlamaIndex workflows.
+This document describes the new PDF processing endpoint that uploads biomedical research PDF files and creates a Neo4j property graph index using LlamaIndex workflows.
 
 ## Overview
 
 The `/upload_pdfs` endpoint allows you to:
-1. Upload multiple PDF files via POST request
+1. Upload multiple biomedical research PDF files via POST request
 2. Extract text content from PDFs using LlamaIndex
-3. Process the content to identify entities and relationships
-4. Store the extracted knowledge graph in Neo4j as a property graph
+3. Process the content to identify biomedical entities (genes, pathways, diseases, treatments, outcomes) and their relationships
+4. Store the extracted biomedical knowledge graph in Neo4j as a property graph for research analysis
 
 ## Endpoint Details
 
@@ -28,8 +28,8 @@ The `/upload_pdfs` endpoint allows you to:
 **Response Model**:
 ```json
 {
-  "message": "Successfully processed X documents and created property graph index",
-  "files_processed": ["file1.pdf", "file2.pdf"],
+  "message": "Successfully processed 2 documents and created property graph index",
+  "files_processed": ["gene_therapy_study.pdf", "pathway_analysis.pdf"],
   "documents_count": 2,
   "graph_store_type": "Neo4j"
 }
@@ -49,53 +49,60 @@ The following environment variables must be set for the endpoint to work:
 
 ## Knowledge Graph Schema
 
-The endpoint extracts the following types of entities and relationships:
+The endpoint extracts biomedical entities and relationships from research documents:
 
 ### Entities
-- **PERSON**: People mentioned in documents
-- **ORGANIZATION**: Companies, institutions, groups
-- **LOCATION**: Places, addresses, geographical locations
-- **CONCEPT**: Abstract concepts, ideas, topics
-- **TECHNOLOGY**: Technologies, tools, software
-- **PRODUCT**: Products, services, offerings
+- **GENE**: Genes, genetic markers, DNA sequences
+- **PATHWAY**: Biological pathways, metabolic processes, signaling cascades
+- **DISEASE**: Diseases, conditions, disorders, syndromes
+- **TREATMENT**: Treatments, therapies, drugs, interventions
+- **TREATMENT_OUTCOME**: Treatment results, outcomes, responses, side effects
 
 ### Relations
-- **WORKS_AT**: Person works at organization
-- **LOCATED_IN**: Entity is located in a place
-- **RELATED_TO**: General relationship between entities
-- **USES**: Entity uses technology/product
-- **DEVELOPS**: Entity develops technology/product
-- **MANAGES**: Person manages entity
-- **PART_OF**: Entity is part of another entity
+- **REGULATES**: Gene/pathway regulates another entity
+- **INTERACTS_WITH**: Direct interaction between entities
+- **CAUSES**: Entity causes disease or outcome
+- **TREATS**: Treatment addresses disease
+- **RESULTS_IN**: Action leads to specific outcome
+- **ASSOCIATED_WITH**: Statistical or observed association
+- **TARGETS**: Treatment targets specific gene/pathway
+- **INHIBITS**: Entity inhibits function of another
+- **ACTIVATES**: Entity activates function of another
+- **PART_OF**: Entity is component of larger system
+- **RESPONDS_TO**: Entity responds to treatment/stimulus
+- **MODULATES**: Entity modifies function of another
+- **INVOLVED_IN**: Entity participates in process
+- **CAUSED_BY**: Disease/outcome caused by entity
+- **TREATED_BY**: Disease addressed by treatment
 
 ## Usage Examples
 
 ### Using curl
 ```bash
-# Upload a single PDF
+# Upload a single biomedical research PDF
 curl -X POST http://localhost:8000/upload_pdfs \
-  -F "files=@document1.pdf"
+  -F "files=@cancer_research_paper.pdf"
 
-# Upload multiple PDFs
+# Upload multiple research PDFs
 curl -X POST http://localhost:8000/upload_pdfs \
-  -F "files=@document1.pdf" \
-  -F "files=@document2.pdf"
+  -F "files=@gene_therapy_study.pdf" \
+  -F "files=@pathway_analysis.pdf"
 ```
 
 ### Using Python requests
 ```python
 import requests
 
-# Upload single PDF
-with open('document.pdf', 'rb') as f:
-    files = {'files': ('document.pdf', f, 'application/pdf')}
+# Upload single biomedical research PDF
+with open('alzheimers_research.pdf', 'rb') as f:
+    files = {'files': ('alzheimers_research.pdf', f, 'application/pdf')}
     response = requests.post('http://localhost:8000/upload_pdfs', files=files)
     print(response.json())
 
-# Upload multiple PDFs
+# Upload multiple research PDFs
 files = [
-    ('files', ('doc1.pdf', open('doc1.pdf', 'rb'), 'application/pdf')),
-    ('files', ('doc2.pdf', open('doc2.pdf', 'rb'), 'application/pdf'))
+    ('files', ('genomics_study.pdf', open('genomics_study.pdf', 'rb'), 'application/pdf')),
+    ('files', ('drug_trial_results.pdf', open('drug_trial_results.pdf', 'rb'), 'application/pdf'))
 ]
 response = requests.post('http://localhost:8000/upload_pdfs', files=files)
 print(response.json())
@@ -108,8 +115,8 @@ for _, (_, file_obj, _) in files:
 ### Using JavaScript/Fetch
 ```javascript
 const formData = new FormData();
-formData.append('files', pdfFile1, 'document1.pdf');
-formData.append('files', pdfFile2, 'document2.pdf');
+formData.append('files', pdfFile1, 'clinical_trial_report.pdf');
+formData.append('files', pdfFile2, 'biomarker_analysis.pdf');
 
 fetch('http://localhost:8000/upload_pdfs', {
     method: 'POST',
@@ -139,7 +146,7 @@ The endpoint handles various error conditions:
 ```json
 {
   "status_code": 400,
-  "detail": "File document.txt is not a PDF file. Only PDF files are allowed.",
+  "detail": "File research_data.txt is not a PDF file. Only PDF files are allowed.",
   "path": "/upload_pdfs",
   "method": "POST"
 }
@@ -162,6 +169,15 @@ Ensure Neo4j is running and accessible:
 3. **Set credentials**: Use Neo4j Browser to set username/password
 4. **Configure environment variables** as described above
 
+### Biomedical Domain Optimization
+
+This endpoint is specifically optimized for biomedical and life sciences research:
+
+- **Entity Recognition**: Trained to identify genes, pathways, diseases, treatments, and outcomes
+- **Relationship Extraction**: Focuses on biomedical relationships like gene regulation, drug targets, and treatment outcomes
+- **Research Paper Processing**: Optimized for scientific literature format and terminology
+- **Clinical Data**: Capable of processing clinical trial reports and treatment outcome studies
+
 ## Testing
 
 Use the provided test script to verify functionality:
@@ -176,10 +192,11 @@ python test_pdf_endpoint.py
 
 ## Performance Considerations
 
-- **File Size**: Large PDFs may take longer to process
-- **Batch Size**: Processing multiple files increases memory usage
-- **Neo4j Performance**: Ensure Neo4j has adequate resources
-- **OpenAI Rate Limits**: Monitor API usage for large document sets
+- **File Size**: Large research papers and clinical studies may take longer to process
+- **Batch Size**: Processing multiple research documents increases memory usage
+- **Neo4j Performance**: Ensure Neo4j has adequate resources for complex biomedical graphs
+- **OpenAI Rate Limits**: Monitor API usage for large research document collections
+- **Entity Complexity**: Biomedical texts with dense terminology may require more processing time
 
 ## Security Notes
 
@@ -206,9 +223,10 @@ python test_pdf_endpoint.py
    - Ensure account has access to required models
 
 4. **"Failed to process PDF files"**
-   - Verify files are valid PDFs
+   - Verify files are valid research PDFs (not scanned images)
    - Check file permissions
    - Ensure sufficient disk space for temporary files
+   - Some research PDFs may have complex formatting that affects text extraction
 
 ### Debug Mode
 
