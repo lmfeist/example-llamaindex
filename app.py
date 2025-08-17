@@ -1,8 +1,10 @@
 import os
 import traceback
 import logging
+import tempfile
+import shutil
 from typing import Any, List, Optional
-from fastapi import FastAPI, HTTPException, Response, Request
+from fastapi import FastAPI, HTTPException, Response, Request, UploadFile, File
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +27,10 @@ from llama_index.core.workflow import (
 # Removed unused imports - FunctionTool and FunctionCallingAgent not needed for this workflow
 from llama_index.llms.openai import OpenAI
 from llama_index.readers.web import SimpleWebPageReader
+from llama_index.core import SimpleDirectoryReader, PropertyGraphIndex
+from llama_index.embeddings.openai import OpenAIEmbedding
+from llama_index.core.indices.property_graph import SchemaLLMPathExtractor
+from llama_index.graph_stores.neo4j import Neo4jPropertyGraphStore
 import requests
 from bs4 import BeautifulSoup
 
@@ -33,6 +39,11 @@ from bs4 import BeautifulSoup
 class ContentFetched(Event):
     content: str
     url: str
+
+
+class PDFsProcessed(Event):
+    documents: List[Any]
+    file_names: List[str]
 
 
 # Website Summarization Workflow
@@ -113,16 +124,126 @@ class WebsiteSummarizationWorkflow(Workflow):
             raise HTTPException(status_code=500, detail=f"Failed to generate summary: {str(e)}")
 
 
+# PDF to Neo4j Property Graph Workflow
+class PDFToGraphWorkflow(Workflow):
+    def __init__(self, llm: Optional[Any] = None):
+        super().__init__()
+        self.llm = llm or OpenAI(model="gpt-4o-mini", temperature=0.0)
+
+    @step
+    async def process_pdfs(self, ev: StartEvent) -> PDFsProcessed:
+        """Process uploaded PDF files and extract documents."""
+        pdf_files = getattr(ev, 'pdf_files', None)
+        
+        if not pdf_files:
+            raise ValueError("PDF files are required")
+        
+        try:
+            # Create temporary directory for PDF processing
+            temp_dir = tempfile.mkdtemp()
+            file_paths = []
+            file_names = []
+            
+            # Save uploaded files temporarily
+            for pdf_file in pdf_files:
+                file_path = os.path.join(temp_dir, pdf_file.filename)
+                with open(file_path, "wb") as f:
+                    content = await pdf_file.read()
+                    f.write(content)
+                file_paths.append(file_path)
+                file_names.append(pdf_file.filename)
+            
+            # Process PDFs with LlamaIndex
+            documents = SimpleDirectoryReader(temp_dir).load_data()
+            
+            # Clean up temporary files
+            shutil.rmtree(temp_dir)
+            
+            return PDFsProcessed(documents=documents, file_names=file_names)
+            
+        except Exception as e:
+            # Clean up temporary directory if it exists
+            if 'temp_dir' in locals() and os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
+            logger.error(f"Failed to process PDF files:\n{traceback.format_exc()}")
+            raise HTTPException(status_code=400, detail=f"Failed to process PDF files: {str(e)}")
+
+    @step
+    async def create_property_graph(self, ev: PDFsProcessed) -> StopEvent:
+        """Create property graph index in Neo4j from processed documents."""
+        try:
+            # Define entities and relations for knowledge extraction
+            entities = ["PERSON", "ORGANIZATION", "LOCATION", "CONCEPT", "TECHNOLOGY", "PRODUCT"]
+            relations = ["WORKS_AT", "LOCATED_IN", "RELATED_TO", "USES", "DEVELOPS", "MANAGES", "PART_OF"]
+            
+            # Create validation schema
+            validation_schema = {
+                "PERSON": ["WORKS_AT", "LOCATED_IN", "RELATED_TO", "USES", "MANAGES"],
+                "ORGANIZATION": ["LOCATED_IN", "RELATED_TO", "USES", "DEVELOPS", "MANAGES"],
+                "LOCATION": ["RELATED_TO", "PART_OF"],
+                "CONCEPT": ["RELATED_TO", "USES", "PART_OF"],
+                "TECHNOLOGY": ["RELATED_TO", "USES", "DEVELOPS"],
+                "PRODUCT": ["RELATED_TO", "USES", "DEVELOPS", "PART_OF"],
+            }
+
+            # Initialize knowledge graph extractor
+            kg_extractor = SchemaLLMPathExtractor(
+                llm=self.llm,
+                possible_entities=entities,
+                possible_relations=relations,
+                kg_validation_schema=validation_schema,
+                strict=True,
+            )
+
+            # Connect to Neo4j using environment variables
+            neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+            neo4j_username = os.getenv("NEO4J_USERNAME", "neo4j")
+            neo4j_password = os.getenv("NEO4J_PASSWORD")
+            
+            if not neo4j_password:
+                raise ValueError("NEO4J_PASSWORD environment variable is required")
+
+            graph_store = Neo4jPropertyGraphStore(
+                username=neo4j_username,
+                password=neo4j_password,
+                url=neo4j_uri,
+            )
+
+            # Create PropertyGraphIndex
+            index = PropertyGraphIndex.from_documents(
+                ev.documents,
+                kg_extractors=[kg_extractor],
+                embed_model=OpenAIEmbedding(model_name="text-embedding-3-small"),
+                property_graph_store=graph_store,
+                show_progress=True,
+            )
+
+            return StopEvent(result={
+                "message": f"Successfully processed {len(ev.documents)} documents and created property graph index",
+                "files_processed": ev.file_names,
+                "documents_count": len(ev.documents),
+                "graph_store_type": "Neo4j"
+            })
+            
+        except Exception as e:
+            logger.error(f"Failed to create property graph:\n{traceback.format_exc()}")
+            raise HTTPException(status_code=500, detail=f"Failed to create property graph: {str(e)}")
+
+
 # Global variables
 summarization_workflow = None
+pdf_workflow = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global summarization_workflow
+    global summarization_workflow, pdf_workflow
     
     # Initialize the website summarization workflow
     summarization_workflow = WebsiteSummarizationWorkflow()
+    
+    # Initialize the PDF to graph workflow
+    pdf_workflow = PDFToGraphWorkflow()
     
     yield
     
@@ -132,8 +253,8 @@ async def lifespan(app: FastAPI):
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Website Summarization API",
-    description="Summarize website content using LlamaIndex",
+    title="LlamaIndex Processing API",
+    description="Website summarization and PDF to Neo4j property graph processing using LlamaIndex",
     version="2.0.0",
     lifespan=lifespan,
     debug=True  # Enable debug mode for detailed error responses
@@ -229,12 +350,19 @@ class HealthResponse(BaseModel):
     message: str
 
 
+class PDFProcessResponse(BaseModel):
+    message: str
+    files_processed: List[str]
+    documents_count: int
+    graph_store_type: str
+
+
 # Health check endpoint
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     return HealthResponse(
         status="healthy",
-        message="Website Summarization API is running"
+        message="LlamaIndex Processing API is running"
     )
 
 
@@ -242,11 +370,13 @@ async def health_check():
 @app.get("/")
 async def root():
     return {
-        "message": "Welcome to the Website Summarization API",
-        "description": "Get AI-powered summaries of website content",
+        "message": "Welcome to the LlamaIndex Processing API",
+        "description": "Get AI-powered summaries of website content and process PDFs into Neo4j property graphs",
         "endpoints": {
             "POST /summarize": "Get a summary of a website",
             "OPTIONS /summarize": "Get allowed methods for summarize endpoint",
+            "POST /upload_pdfs": "Upload PDF files and create Neo4j property graph index",
+            "OPTIONS /upload_pdfs": "Get allowed methods for upload_pdfs endpoint",
             "GET /health": "Health check endpoint",
             "GET /docs": "API documentation"
         }
@@ -292,6 +422,60 @@ async def summarize_website(request: URLRequest):
 async def summarize_options():
     """
     Handle OPTIONS request for the summarize endpoint.
+    Returns allowed methods. CORS headers are handled by middleware.
+    """
+    response = Response()
+    response.headers["Allow"] = "POST, OPTIONS"
+    
+    return response
+
+
+# PDF to Neo4j Property Graph endpoint
+@app.post("/upload_pdfs", response_model=PDFProcessResponse)
+async def upload_pdfs(files: List[UploadFile] = File(...)):
+    """
+    Upload PDF files and process them into a Neo4j property graph index.
+    
+    Args:
+        files: List of PDF files to upload and process
+        
+    Returns:
+        PDFProcessResponse containing processing results and metadata
+    """
+    try:
+        # Validate file types
+        for file in files:
+            if not file.filename.lower().endswith('.pdf'):
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"File {file.filename} is not a PDF file. Only PDF files are allowed."
+                )
+        
+        # Run the PDF processing workflow
+        result = await pdf_workflow.run(pdf_files=files)
+        
+        return PDFProcessResponse(
+            message=result["message"],
+            files_processed=result["files_processed"],
+            documents_count=result["documents_count"],
+            graph_store_type=result["graph_store_type"]
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Log the full exception with stack trace for debugging
+        logger.error(f"Error in upload_pdfs endpoint:\n{traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"An error occurred while processing PDF files: {str(e)}"
+        )
+
+
+@app.options("/upload_pdfs")
+async def upload_pdfs_options():
+    """
+    Handle OPTIONS request for the upload_pdfs endpoint.
     Returns allowed methods. CORS headers are handled by middleware.
     """
     response = Response()
