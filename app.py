@@ -3,7 +3,7 @@ import traceback
 import logging
 import tempfile
 import shutil
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Literal
 from fastapi import FastAPI, HTTPException, Response, Request, UploadFile, File
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import JSONResponse
