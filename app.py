@@ -1,4 +1,5 @@
 import os
+import asyncio
 import traceback
 import logging
 import tempfile
@@ -473,8 +474,16 @@ async def upload_pdfs(files: List[UploadFile] = File(...)):
                     detail=f"File {file.filename} is not a PDF file. Only PDF files are allowed."
                 )
         
-        # Run the PDF processing workflow
-        result = await pdf_workflow.run(pdf_files=files)
+        # Run the PDF processing workflow with increased timeout (5 minutes)
+        try:
+            async with asyncio.timeout(300):  # 300 seconds = 5 minutes
+                result = await pdf_workflow.run(pdf_files=files)
+        except asyncio.TimeoutError:
+            logger.error("PDF workflow timed out after 300 seconds")
+            raise HTTPException(
+                status_code=500,
+                detail="PDF processing timed out. Please try with smaller files or fewer files."
+            )
         
         return PDFProcessResponse(
             message=result["message"],
