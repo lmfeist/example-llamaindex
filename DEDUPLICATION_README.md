@@ -1,21 +1,32 @@
-# Entity Deduplication for Property Graphs
+# Entity and Node Deduplication for Property Graphs
 
-This document describes the entity deduplication functionality implemented for Neo4j property graphs in the LlamaIndex Processing API.
+This document describes the entity and node deduplication functionality implemented for Neo4j property graphs in the LlamaIndex Processing API.
 
 ## Overview
 
-The entity deduplication system automatically identifies and merges duplicate entities in a Neo4j property graph using:
-- **Vector Similarity**: Cosine similarity on entity embeddings
-- **String Matching**: Edit distance and substring matching on entity names
-- **Label Consistency**: Only merges entities with identical labels
+The deduplication system automatically identifies and merges duplicate entities and nodes in a Neo4j property graph using:
+- **Vector Similarity**: Cosine similarity on embeddings
+- **String Matching**: Edit distance and substring matching on names
+- **Label Consistency**: Only merges nodes with identical labels
+- **Dual Processing**: Handles both `__Entity__` and `__Node__` labels
 
 ## How It Works
 
 ### 1. Vector Index Creation
-The system creates a vector index on entity embeddings:
+The system creates vector indexes for both entity and node embeddings:
 ```cypher
+-- For entities
 CREATE VECTOR INDEX entity IF NOT EXISTS
 FOR (m:`__Entity__`)
+ON m.embedding
+OPTIONS {indexConfig: {
+ `vector.dimensions`: 1536,
+ `vector.similarity_function`: 'cosine'
+}}
+
+-- For nodes
+CREATE VECTOR INDEX node IF NOT EXISTS
+FOR (m:`__Node__`)
 ON m.embedding
 OPTIONS {indexConfig: {
  `vector.dimensions`: 1536,
@@ -24,24 +35,24 @@ OPTIONS {indexConfig: {
 ```
 
 ### 2. Duplicate Detection
-For each entity, the system:
-- Finds similar entities using vector similarity (default threshold: 0.9)
+For each entity and node type (`__Entity__` and `__Node__`), the system:
+- Finds similar nodes using vector similarity (default threshold: 0.9)
 - Applies string matching filters:
   - Substring containment (case-insensitive)
   - Edit distance matching (default max distance: 5)
-- Ensures entities have identical labels
+- Ensures nodes have identical labels
 
-### 3. Entity Merging
+### 3. Node/Entity Merging
 When duplicates are found:
-- The first entity in alphabetical order becomes the canonical entity
-- All relationships from duplicate entities are transferred to the canonical entity
-- Properties from duplicate entities are merged into the canonical entity
-- Duplicate entities are deleted
+- The first node in alphabetical order becomes the canonical node
+- All relationships from duplicate nodes are transferred to the canonical node
+- Properties from duplicate nodes are merged into the canonical node
+- Duplicate nodes are deleted
 
 ## Usage
 
 ### Automatic Deduplication
-Entity deduplication runs automatically after property graph creation when processing PDF files. There is no separate endpoint - deduplication is integrated into the document processing workflow:
+Entity and node deduplication runs automatically after property graph creation when processing PDF files. There is no separate endpoint - deduplication is integrated into the document processing workflow:
 
 ```bash
 # Deduplication happens automatically after graph creation
@@ -51,9 +62,10 @@ POST /upload_pdfs
 The deduplication process uses default parameters:
 - **Similarity Threshold**: 0.9 (cosine similarity)
 - **Word Edit Distance**: 5 (maximum Levenshtein distance)
+- **Node Types**: Both `__Entity__` and `__Node__` labels are processed
 
 ### Response Format
-The upload endpoint returns information about merged entities:
+The upload endpoint returns information about merged entities and nodes:
 
 ```json
 {
@@ -65,31 +77,48 @@ The upload endpoint returns information about merged entities:
 }
 ```
 
+Note: The `entities_merged` count includes both `__Entity__` and `__Node__` duplicates that were merged.
+
 ## Configuration Parameters
 
-The deduplication process uses hardcoded parameters optimized for biomedical entities:
+The deduplication process uses hardcoded parameters optimized for biomedical entities and nodes:
 
 ### Similarity Threshold: 0.9
-- **Description**: Minimum cosine similarity for entities to be considered duplicates
-- **Rationale**: High threshold reduces false positives in biomedical entity matching
+- **Description**: Minimum cosine similarity for entities/nodes to be considered duplicates
+- **Rationale**: High threshold reduces false positives in biomedical entity and node matching
 
 ### Word Edit Distance: 5
 - **Description**: Maximum Levenshtein distance for string matching
-- **Rationale**: Allows for common variations in biomedical entity naming (e.g., "TP53" vs "tp53")
+- **Rationale**: Allows for common variations in biomedical entity/node naming (e.g., "TP53" vs "tp53")
+
+### Node Types Processed
+- **`__Entity__`**: Biomedical entities (genes, diseases, treatments, etc.)
+- **`__Node__`**: General nodes in the property graph
+- **Processing**: Both types are processed sequentially with the same parameters
 
 ## Example Scenarios
 
 ### Before Deduplication
 ```
+-- __Entity__ nodes
 - Entity: "TP53" (GENE)
 - Entity: "tp53" (GENE)  
 - Entity: "P53" (GENE)
 - Entity: "tumor protein p53" (GENE)
+
+-- __Node__ nodes  
+- Node: "DNA repair pathway"
+- Node: "dna repair pathway"
+- Node: "DNA_repair_pathway"
 ```
 
 ### After Deduplication
 ```
+-- __Entity__ nodes
 - Entity: "P53" (GENE) [canonical entity with merged relationships]
+
+-- __Node__ nodes
+- Node: "DNA repair pathway" [canonical node with merged relationships]
 ```
 
 ## Prerequisites
@@ -141,9 +170,12 @@ The deduplication process includes comprehensive error handling:
 ### Logs to Check
 ```bash
 # Application logs show deduplication progress
-logger.info("Starting entity deduplication process...")
-logger.info("Merging entities: ['tp53', 'TP53'] -> P53")
-logger.info("Successfully merged 5 duplicate entities")
+logger.info("Starting entity and node deduplication process...")
+logger.info("Processing duplicates for __Entity__ nodes...")
+logger.info("Merging __Entity__ nodes: ['tp53', 'TP53'] -> P53")
+logger.info("Processing duplicates for __Node__ nodes...")
+logger.info("Merging __Node__ nodes: ['dna repair pathway'] -> DNA repair pathway")
+logger.info("Successfully merged 5 duplicate entities and nodes")
 ```
 
 ## Best Practices

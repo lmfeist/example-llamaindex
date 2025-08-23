@@ -258,7 +258,7 @@ class PDFToGraphWorkflow(Workflow):
 
     def deduplicate_entities(self, graph_store: Neo4jPropertyGraphStore, similarity_threshold: float = 0.9, word_edit_distance: int = 5):
         """
-        Deduplicate entities in the property graph using vector similarity and string matching.
+        Deduplicate entities and nodes in the property graph using vector similarity and string matching.
         
         Args:
             graph_store: The Neo4j property graph store instance
@@ -266,10 +266,10 @@ class PDFToGraphWorkflow(Workflow):
             word_edit_distance: Maximum edit distance for string matching (default: 5)
         """
         try:
-            logger.info(f"Starting entity deduplication with similarity_threshold={similarity_threshold}, word_edit_distance={word_edit_distance}")
+            logger.info(f"Starting entity and node deduplication with similarity_threshold={similarity_threshold}, word_edit_distance={word_edit_distance}")
             
-            # Create vector index for entity embeddings if it doesn't exist
-            create_index_query = """
+            # Create vector indexes for both entity and node embeddings if they don't exist
+            create_entity_index_query = """
             CREATE VECTOR INDEX entity IF NOT EXISTS
             FOR (m:`__Entity__`)
             ON m.embedding
@@ -278,101 +278,128 @@ class PDFToGraphWorkflow(Workflow):
              `vector.similarity_function`: 'cosine'
             }}
             """
-            graph_store.structured_query(create_index_query)
-            logger.info("Created vector index for entity embeddings")
             
-            # Find duplicate entities using vector similarity and string matching
-            find_duplicates_query = """
-            MATCH (e:__Entity__)
-            CALL {
-              WITH e
-              CALL db.index.vector.queryNodes('entity', 10, e.embedding)
-              YIELD node, score
-              WITH node, score
-              WHERE score > toFloat($cutoff)
-                  AND (toLower(node.name) CONTAINS toLower(e.name) OR toLower(e.name) CONTAINS toLower(node.name)
-                       OR apoc.text.distance(toLower(node.name), toLower(e.name)) < $distance)
-                  AND labels(e) = labels(node)
-              WITH node, score
-              ORDER BY node.name
-              RETURN collect(node) AS nodes
-            }
-            WITH distinct nodes
-            WHERE size(nodes) > 1
-            WITH collect([n in nodes | n.name]) AS results
-            UNWIND range(0, size(results)-1, 1) as index
-            WITH results, index, results[index] as result
-            WITH apoc.coll.sort(reduce(acc = result, index2 IN range(0, size(results)-1, 1) |
-                    CASE WHEN index <> index2 AND
-                        size(apoc.coll.intersection(acc, results[index2])) > 0
-                        THEN apoc.coll.union(acc, results[index2])
-                        ELSE acc
-                    END
-            )) as combinedResult
-            WITH distinct(combinedResult) as combinedResult
-            // extra filtering
-            WITH collect(combinedResult) as allCombinedResults
-            UNWIND range(0, size(allCombinedResults)-1, 1) as combinedResultIndex
-            WITH allCombinedResults[combinedResultIndex] as combinedResult, combinedResultIndex, allCombinedResults
-            WHERE NOT any(x IN range(0,size(allCombinedResults)-1,1) 
-                WHERE x <> combinedResultIndex
-                AND apoc.coll.containsAll(allCombinedResults[x], combinedResult)
-            )
-            RETURN combinedResult  
+            create_node_index_query = """
+            CREATE VECTOR INDEX node IF NOT EXISTS
+            FOR (m:`__Node__`)
+            ON m.embedding
+            OPTIONS {indexConfig: {
+             `vector.dimensions`: 1536,
+             `vector.similarity_function`: 'cosine'
+            }}
             """
             
-            # Execute the query to find duplicate groups
-            duplicate_groups = graph_store.structured_query(
-                find_duplicates_query, 
-                param_map={'cutoff': similarity_threshold, 'distance': word_edit_distance}
-            )
+            graph_store.structured_query(create_entity_index_query)
+            graph_store.structured_query(create_node_index_query)
+            logger.info("Created vector indexes for entity and node embeddings")
             
-            if not duplicate_groups:
-                logger.info("No duplicate entities found")
-                return 0
-            
+            # Process both __Entity__ and __Node__ labels
             total_merged = 0
-            for group_data in duplicate_groups:
-                duplicate_names = group_data['combinedResult']
-                if len(duplicate_names) > 1:
-                    # Keep the first entity as the canonical one and merge others into it
-                    canonical_name = duplicate_names[0]
-                    duplicates_to_merge = duplicate_names[1:]
-                    
-                    logger.info(f"Merging entities: {duplicates_to_merge} -> {canonical_name}")
-                    
-                    # Merge duplicate entities into the canonical one
-                    for duplicate_name in duplicates_to_merge:
-                        merge_query = """
-                        MATCH (canonical:__Entity__ {name: $canonical_name})
-                        MATCH (duplicate:__Entity__ {name: $duplicate_name})
-                        WHERE labels(canonical) = labels(duplicate)
-                        
-                        // Transfer all relationships from duplicate to canonical
-                        OPTIONAL MATCH (duplicate)-[r]-(other)
-                        WHERE other <> canonical
-                        WITH canonical, duplicate, type(r) as relType, other, properties(r) as relProps
-                        CALL apoc.create.relationship(canonical, relType, relProps, other) YIELD rel
-                        
-                        // Merge properties from duplicate to canonical
-                        WITH canonical, duplicate
-                        SET canonical += duplicate
-                        
-                        // Delete the duplicate entity and its relationships
-                        DETACH DELETE duplicate
-                        """
-                        
-                        graph_store.structured_query(
-                            merge_query,
-                            param_map={
-                                'canonical_name': canonical_name,
-                                'duplicate_name': duplicate_name
-                            }
-                        )
-                    
-                    total_merged += len(duplicates_to_merge)
             
-            logger.info(f"Successfully merged {total_merged} duplicate entities")
+            # Define the node types to process
+            node_types = [
+                {'label': '__Entity__', 'index': 'entity'},
+                {'label': '__Node__', 'index': 'node'}
+            ]
+            
+            for node_type in node_types:
+                label = node_type['label']
+                index_name = node_type['index']
+                
+                logger.info(f"Processing duplicates for {label} nodes...")
+                
+                # Find duplicate nodes using vector similarity and string matching
+                find_duplicates_query = f"""
+                MATCH (e:{label})
+                CALL {{
+                  WITH e
+                  CALL db.index.vector.queryNodes('{index_name}', 10, e.embedding)
+                  YIELD node, score
+                  WITH node, score
+                  WHERE score > toFloat($cutoff)
+                      AND (toLower(node.name) CONTAINS toLower(e.name) OR toLower(e.name) CONTAINS toLower(node.name)
+                           OR apoc.text.distance(toLower(node.name), toLower(e.name)) < $distance)
+                      AND labels(e) = labels(node)
+                  WITH node, score
+                  ORDER BY node.name
+                  RETURN collect(node) AS nodes
+                }}
+                WITH distinct nodes
+                WHERE size(nodes) > 1
+                WITH collect([n in nodes | n.name]) AS results
+                UNWIND range(0, size(results)-1, 1) as index
+                WITH results, index, results[index] as result
+                WITH apoc.coll.sort(reduce(acc = result, index2 IN range(0, size(results)-1, 1) |
+                        CASE WHEN index <> index2 AND
+                            size(apoc.coll.intersection(acc, results[index2])) > 0
+                            THEN apoc.coll.union(acc, results[index2])
+                            ELSE acc
+                        END
+                )) as combinedResult
+                WITH distinct(combinedResult) as combinedResult
+                // extra filtering
+                WITH collect(combinedResult) as allCombinedResults
+                UNWIND range(0, size(allCombinedResults)-1, 1) as combinedResultIndex
+                WITH allCombinedResults[combinedResultIndex] as combinedResult, combinedResultIndex, allCombinedResults
+                WHERE NOT any(x IN range(0,size(allCombinedResults)-1,1) 
+                    WHERE x <> combinedResultIndex
+                    AND apoc.coll.containsAll(allCombinedResults[x], combinedResult)
+                )
+                RETURN combinedResult  
+                """
+                
+                # Execute the query to find duplicate groups for this node type
+                duplicate_groups = graph_store.structured_query(
+                    find_duplicates_query, 
+                    param_map={'cutoff': similarity_threshold, 'distance': word_edit_distance}
+                )
+                
+                if not duplicate_groups:
+                    logger.info(f"No duplicate {label} nodes found")
+                    continue
+                
+                # Process duplicate groups for this node type
+                for group_data in duplicate_groups:
+                    duplicate_names = group_data['combinedResult']
+                    if len(duplicate_names) > 1:
+                        # Keep the first node as the canonical one and merge others into it
+                        canonical_name = duplicate_names[0]
+                        duplicates_to_merge = duplicate_names[1:]
+                        
+                        logger.info(f"Merging {label} nodes: {duplicates_to_merge} -> {canonical_name}")
+                        
+                        # Merge duplicate nodes into the canonical one
+                        for duplicate_name in duplicates_to_merge:
+                            merge_query = f"""
+                            MATCH (canonical:{label} {{name: $canonical_name}})
+                            MATCH (duplicate:{label} {{name: $duplicate_name}})
+                            WHERE labels(canonical) = labels(duplicate)
+                            
+                            // Transfer all relationships from duplicate to canonical
+                            OPTIONAL MATCH (duplicate)-[r]-(other)
+                            WHERE other <> canonical
+                            WITH canonical, duplicate, type(r) as relType, other, properties(r) as relProps
+                            CALL apoc.create.relationship(canonical, relType, relProps, other) YIELD rel
+                            
+                            // Merge properties from duplicate to canonical
+                            WITH canonical, duplicate
+                            SET canonical += duplicate
+                            
+                            // Delete the duplicate node and its relationships
+                            DETACH DELETE duplicate
+                            """
+                            
+                            graph_store.structured_query(
+                                merge_query,
+                                param_map={
+                                    'canonical_name': canonical_name,
+                                    'duplicate_name': duplicate_name
+                                }
+                            )
+                        
+                        total_merged += len(duplicates_to_merge)
+            
+            logger.info(f"Successfully merged {total_merged} duplicate entities and nodes")
             return total_merged
             
         except Exception as e:
