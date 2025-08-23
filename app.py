@@ -509,16 +509,7 @@ class PDFProcessResponse(BaseModel):
     graph_store_type: str
 
 
-class DeduplicationResponse(BaseModel):
-    message: str
-    entities_merged: int
-    similarity_threshold: float
-    word_edit_distance: int
 
-
-class DeduplicationRequest(BaseModel):
-    similarity_threshold: float = 0.9
-    word_edit_distance: int = 5
 
 
 # Health check endpoint
@@ -648,67 +639,7 @@ async def upload_pdfs_options():
     return response
 
 
-@app.post("/deduplicate", response_model=DeduplicationResponse)
-async def deduplicate_entities_endpoint(request: DeduplicationRequest):
-    """
-    Deduplicate entities in an existing Neo4j property graph.
-    
-    This endpoint connects to the configured Neo4j database and performs entity
-    deduplication using vector similarity and string matching techniques.
-    """
-    try:
-        # Connect to Neo4j using environment variables
-        neo4j_uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-        neo4j_username = os.getenv("NEO4J_USERNAME", "neo4j")
-        neo4j_password = os.getenv("NEO4J_PASSWORD")
-        
-        if not neo4j_password:
-            raise HTTPException(
-                status_code=400, 
-                detail="NEO4J_PASSWORD environment variable is required"
-            )
 
-        graph_store = Neo4jPropertyGraphStore(
-            username=neo4j_username,
-            password=neo4j_password,
-            url=neo4j_uri,
-        )
-        
-        # Create a workflow instance to access the deduplication method
-        workflow = PDFToGraphWorkflow(llm=OpenAI(model="gpt-4o-mini", temperature=0.0))
-        
-        # Perform deduplication
-        merged_count = workflow.deduplicate_entities(
-            graph_store, 
-            similarity_threshold=request.similarity_threshold,
-            word_edit_distance=request.word_edit_distance
-        )
-        
-        return DeduplicationResponse(
-            message=f"Successfully deduplicated entities. Merged {merged_count} duplicate entities.",
-            entities_merged=merged_count,
-            similarity_threshold=request.similarity_threshold,
-            word_edit_distance=request.word_edit_distance
-        )
-        
-    except Exception as e:
-        logger.error(f"Failed to deduplicate entities:\n{traceback.format_exc()}")
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Failed to deduplicate entities: {str(e)}"
-        )
-
-
-@app.options("/deduplicate")
-async def deduplicate_options():
-    """
-    Handle OPTIONS request for the deduplicate endpoint.
-    Returns allowed methods. CORS headers are handled by middleware.
-    """
-    response = Response()
-    response.headers["Allow"] = "POST, OPTIONS"
-    
-    return response
 
 
 if __name__ == "__main__":

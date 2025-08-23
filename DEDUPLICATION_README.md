@@ -41,27 +41,19 @@ When duplicates are found:
 ## Usage
 
 ### Automatic Deduplication
-Entity deduplication runs automatically after property graph creation when processing PDF files:
+Entity deduplication runs automatically after property graph creation when processing PDF files. There is no separate endpoint - deduplication is integrated into the document processing workflow:
 
-```python
+```bash
 # Deduplication happens automatically after graph creation
 POST /upload_pdfs
 ```
 
-### Manual Deduplication
-You can also run deduplication on an existing graph:
-
-```python
-# Manual deduplication endpoint
-POST /deduplicate
-{
-    "similarity_threshold": 0.9,    # Optional, default: 0.9
-    "word_edit_distance": 5         # Optional, default: 5
-}
-```
+The deduplication process uses default parameters:
+- **Similarity Threshold**: 0.9 (cosine similarity)
+- **Word Edit Distance**: 5 (maximum Levenshtein distance)
 
 ### Response Format
-Both endpoints return information about merged entities:
+The upload endpoint returns information about merged entities:
 
 ```json
 {
@@ -75,17 +67,15 @@ Both endpoints return information about merged entities:
 
 ## Configuration Parameters
 
-### Similarity Threshold (0.0 - 1.0)
-- **Default**: 0.9
-- **Description**: Minimum cosine similarity for entities to be considered duplicates
-- **Higher values**: More strict matching (fewer false positives)
-- **Lower values**: More lenient matching (may create false positives)
+The deduplication process uses hardcoded parameters optimized for biomedical entities:
 
-### Word Edit Distance (integer)
-- **Default**: 5
+### Similarity Threshold: 0.9
+- **Description**: Minimum cosine similarity for entities to be considered duplicates
+- **Rationale**: High threshold reduces false positives in biomedical entity matching
+
+### Word Edit Distance: 5
 - **Description**: Maximum Levenshtein distance for string matching
-- **Higher values**: More lenient string matching
-- **Lower values**: More strict string matching
+- **Rationale**: Allows for common variations in biomedical entity naming (e.g., "TP53" vs "tp53")
 
 ## Example Scenarios
 
@@ -123,6 +113,7 @@ The deduplication process includes comprehensive error handling:
 - Detailed logging of merge operations
 - Transaction safety for merge operations
 - Returns count of successfully merged entities
+- Non-blocking: if deduplication fails, the graph creation still succeeds
 
 ## Performance Considerations
 
@@ -141,7 +132,7 @@ The deduplication process includes comprehensive error handling:
 
 2. **Insufficient Memory**
    - Increase Neo4j heap size
-   - Consider processing smaller batches
+   - Consider processing smaller document batches
 
 3. **Vector Index Errors**
    - Ensure Neo4j version supports vector indexing
@@ -157,8 +148,8 @@ logger.info("Successfully merged 5 duplicate entities")
 
 ## Best Practices
 
-1. **Run deduplication after initial graph creation**
-2. **Monitor merge counts to validate results**
-3. **Adjust thresholds based on domain-specific needs**
-4. **Regular deduplication for frequently updated graphs**
-5. **Backup graphs before running deduplication on production data**
+1. **Monitor merge counts** in response messages to validate results
+2. **Check logs** for deduplication progress and any errors
+3. **Ensure sufficient Neo4j memory** for large document sets
+4. **Backup graphs** before processing large document collections
+5. **Verify APOC plugin** is installed and configured correctly
