@@ -240,16 +240,145 @@ class PDFToGraphWorkflow(Workflow):
                 show_progress=True,
             )
 
+            # Deduplicate entities after graph creation
+            logger.info("Starting entity deduplication process...")
+            merged_count = self.deduplicate_entities(graph_store)
+            
             return StopEvent(result={
-                "message": f"Successfully processed {len(ev.documents)} documents and created property graph index",
+                "message": f"Successfully processed {len(ev.documents)} documents and created property graph index. Merged {merged_count} duplicate entities.",
                 "files_processed": ev.file_names,
                 "documents_count": len(ev.documents),
+                "entities_merged": merged_count,
                 "graph_store_type": "Neo4j"
             })
             
         except Exception as e:
             logger.error(f"Failed to create property graph:\n{traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=f"Failed to create property graph: {str(e)}")
+
+    def deduplicate_entities(self, graph_store: Neo4jPropertyGraphStore, similarity_threshold: float = 0.9, word_edit_distance: int = 5):
+        """
+        Deduplicate entities in the property graph using vector similarity and string matching.
+        
+        Args:
+            graph_store: The Neo4j property graph store instance
+            similarity_threshold: Minimum cosine similarity threshold for entity matching (default: 0.9)
+            word_edit_distance: Maximum edit distance for string matching (default: 5)
+        """
+        try:
+            logger.info(f"Starting entity deduplication with similarity_threshold={similarity_threshold}, word_edit_distance={word_edit_distance}")
+            
+            # Create vector index for entity embeddings if it doesn't exist
+            create_index_query = """
+            CREATE VECTOR INDEX entity IF NOT EXISTS
+            FOR (m:`__Entity__`)
+            ON m.embedding
+            OPTIONS {indexConfig: {
+             `vector.dimensions`: 1536,
+             `vector.similarity_function`: 'cosine'
+            }}
+            """
+            graph_store.structured_query(create_index_query)
+            logger.info("Created vector index for entity embeddings")
+            
+            # Find duplicate entities using vector similarity and string matching
+            find_duplicates_query = """
+            MATCH (e:__Entity__)
+            CALL {
+              WITH e
+              CALL db.index.vector.queryNodes('entity', 10, e.embedding)
+              YIELD node, score
+              WITH node, score
+              WHERE score > toFloat($cutoff)
+                  AND (toLower(node.name) CONTAINS toLower(e.name) OR toLower(e.name) CONTAINS toLower(node.name)
+                       OR apoc.text.distance(toLower(node.name), toLower(e.name)) < $distance)
+                  AND labels(e) = labels(node)
+              WITH node, score
+              ORDER BY node.name
+              RETURN collect(node) AS nodes
+            }
+            WITH distinct nodes
+            WHERE size(nodes) > 1
+            WITH collect([n in nodes | n.name]) AS results
+            UNWIND range(0, size(results)-1, 1) as index
+            WITH results, index, results[index] as result
+            WITH apoc.coll.sort(reduce(acc = result, index2 IN range(0, size(results)-1, 1) |
+                    CASE WHEN index <> index2 AND
+                        size(apoc.coll.intersection(acc, results[index2])) > 0
+                        THEN apoc.coll.union(acc, results[index2])
+                        ELSE acc
+                    END
+            )) as combinedResult
+            WITH distinct(combinedResult) as combinedResult
+            // extra filtering
+            WITH collect(combinedResult) as allCombinedResults
+            UNWIND range(0, size(allCombinedResults)-1, 1) as combinedResultIndex
+            WITH allCombinedResults[combinedResultIndex] as combinedResult, combinedResultIndex, allCombinedResults
+            WHERE NOT any(x IN range(0,size(allCombinedResults)-1,1) 
+                WHERE x <> combinedResultIndex
+                AND apoc.coll.containsAll(allCombinedResults[x], combinedResult)
+            )
+            RETURN combinedResult  
+            """
+            
+            # Execute the query to find duplicate groups
+            duplicate_groups = graph_store.structured_query(
+                find_duplicates_query, 
+                param_map={'cutoff': similarity_threshold, 'distance': word_edit_distance}
+            )
+            
+            if not duplicate_groups:
+                logger.info("No duplicate entities found")
+                return 0
+            
+            total_merged = 0
+            for group_data in duplicate_groups:
+                duplicate_names = group_data['combinedResult']
+                if len(duplicate_names) > 1:
+                    # Keep the first entity as the canonical one and merge others into it
+                    canonical_name = duplicate_names[0]
+                    duplicates_to_merge = duplicate_names[1:]
+                    
+                    logger.info(f"Merging entities: {duplicates_to_merge} -> {canonical_name}")
+                    
+                    # Merge duplicate entities into the canonical one
+                    for duplicate_name in duplicates_to_merge:
+                        merge_query = """
+                        MATCH (canonical:__Entity__ {name: $canonical_name})
+                        MATCH (duplicate:__Entity__ {name: $duplicate_name})
+                        WHERE labels(canonical) = labels(duplicate)
+                        
+                        // Transfer all relationships from duplicate to canonical
+                        OPTIONAL MATCH (duplicate)-[r]-(other)
+                        WHERE other <> canonical
+                        WITH canonical, duplicate, type(r) as relType, other, properties(r) as relProps
+                        CALL apoc.create.relationship(canonical, relType, relProps, other) YIELD rel
+                        
+                        // Merge properties from duplicate to canonical
+                        WITH canonical, duplicate
+                        SET canonical += duplicate
+                        
+                        // Delete the duplicate entity and its relationships
+                        DETACH DELETE duplicate
+                        """
+                        
+                        graph_store.structured_query(
+                            merge_query,
+                            param_map={
+                                'canonical_name': canonical_name,
+                                'duplicate_name': duplicate_name
+                            }
+                        )
+                    
+                    total_merged += len(duplicates_to_merge)
+            
+            logger.info(f"Successfully merged {total_merged} duplicate entities")
+            return total_merged
+            
+        except Exception as e:
+            logger.error(f"Failed to deduplicate entities: {str(e)}")
+            logger.error(f"Full traceback:\n{traceback.format_exc()}")
+            return 0
 
 
 # Global variables
@@ -376,7 +505,11 @@ class PDFProcessResponse(BaseModel):
     message: str
     files_processed: List[str]
     documents_count: int
+    entities_merged: int
     graph_store_type: str
+
+
+
 
 
 # Health check endpoint
@@ -504,6 +637,9 @@ async def upload_pdfs_options():
     response.headers["Allow"] = "POST, OPTIONS"
     
     return response
+
+
+
 
 
 if __name__ == "__main__":
